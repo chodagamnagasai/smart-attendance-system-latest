@@ -1,78 +1,69 @@
-# Smart Attendance System — FSD2
+# Smart Attendance System — FSD2 Production-Style Upgrade
 
-A continuation of the FSD1 Smart Attendance frontend. FSD2 converts the static HTML/CSS/JS prototype into a full-stack application using React, Node.js, Express and SQLite.
+This project is the FSD2 full-stack continuation of the original Smart Attendance frontend. It uses React, Node.js, Express and MongoDB, with server-enforced location validation and rotating QR attendance.
 
-## Technology stack
-
+## Stack
 - Frontend: React, Vite, React Router, Axios
 - Backend: Node.js, Express
-- Database: SQLite using sql.js (WebAssembly, no native C++ build required)
-- Authentication: JWT + bcryptjs
-- QR: qrcode for generation and html5-qrcode for browser scanning
-- Security basics: Helmet, CORS, rate limiting, server-side role checks
+- Database: MongoDB via Mongoose
+- Authentication: JWT + bcryptjs; no public registration and no seeded/demo users
+- QR: `qrcode` generation + `html5-qrcode` scanning
+- Security: Helmet, CORS, rate limiting, strict backend role checks, strong-password policy
 
-## Project structure
+## New production-style attendance controls
+1. **Location-based attendance** — Admin configures latitude, longitude and an allowed radius (10–10,000m). The server calculates Haversine distance and rejects attendance outside the radius.
+2. **Dynamic QR** — Faculty attendance QR rotates every 20 seconds. The token is an HMAC-signed, server-verifiable payload; only the current 20-second slot is accepted.
+3. **Strict authentication** — No demo accounts and no public registration endpoint. The first admin is created with the secure CLI bootstrap command. Admins create faculty/student accounts.
+4. **MongoDB** — SQLite/sql.js has been removed. Use local MongoDB or MongoDB Atlas through `MONGODB_URI`.
 
-```text
-smart-attendance-fsd2/
-├── frontend/          # React/Vite SPA
-├── backend/           # Express REST API + SQLite
-├── package.json       # root scripts
-└── README.md
-```
+## Setup
+Requirements: Node.js 20+ recommended and MongoDB 7+ local or MongoDB Atlas.
 
-## Run locally
-
-Requirements: Node.js 18+ (Node.js 20/22 LTS is recommended for classroom projects; Node.js 26 is also supported by this dependency set).
-
+### 1. Install dependencies
 ```bash
 npm install
 npm run install:all
-npm run dev
 ```
 
+### 2. Configure MongoDB and secrets
+Copy `backend/.env.example` to `backend/.env` and set:
+```env
+PORT=5000
+NODE_ENV=development
+CLIENT_URL=http://localhost:5173
+MONGODB_URI=mongodb://127.0.0.1:27017/smart_attendance
+JWT_SECRET=<random-secret-at-least-32-characters>
+QR_SECRET=<different-random-secret-at-least-32-characters>
+MONGODB_MAX_POOL_SIZE=10
+```
+For MongoDB Atlas, replace `MONGODB_URI` with your Atlas connection string.
+
+### 3. Create the first administrator
+There are no default credentials. Run:
+```bash
+npm --prefix backend run create-admin -- --userCode ADMIN001 --name "System Administrator" --email admin@example.com --password "StrongPassword123"
+```
+Use your own strong password. The command creates only an admin account; no students, faculty, subjects or attendance are seeded.
+
+### 4. Start the application
+```bash
+npm run dev
+```
 Frontend: http://localhost:5173
 API: http://localhost:5000/api
 
-The backend creates `backend/data/attendance.db` automatically on first run. The SQLite database is handled through sql.js/WebAssembly, so Windows does not need Visual Studio C++ build tools or node-gyp for this project.
+## First-time workflow
+1. Log in as the administrator.
+2. Open **Location** and configure the college/classroom latitude, longitude and radius.
+3. Create faculty and student accounts with strong passwords.
+4. Create subjects and enroll students.
+5. Faculty starts a QR session. The QR automatically rotates every 20 seconds.
+6. Students enable browser location and scan the current QR.
+7. The API verifies authentication, enrollment, QR signature/current 20-second slot, session expiry and location radius before inserting attendance.
 
-## Demo accounts
-
-All demo passwords: `Password@123`
-
-- Admin: `admin001`
-- Faculty: `faculty001`
-- Student: `student001`
-
-A seeded faculty subject and student are also created automatically.
-
-## Main FSD2 flows
-
-1. Login using the backend authentication API.
-2. Faculty creates a live attendance session for a subject.
-3. Backend creates a short-lived QR token for that session.
-4. Student scans the QR code or enters the token.
-5. Backend validates the token, session expiry and student enrollment before recording attendance.
-6. Faculty can manually override attendance and view reports.
-7. Admin can manage students, faculty and subjects.
-8. Student can view attendance history and subject-wise percentages.
-
-## API overview
-
-- `POST /api/auth/login`
-- `POST /api/auth/register`
-- `GET /api/dashboard/summary`
-- `GET/POST/PUT/DELETE /api/students`
-- `GET/POST/PUT/DELETE /api/faculty`
-- `GET/POST/PUT/DELETE /api/subjects`
-- `POST /api/attendance/sessions`
-- `GET /api/attendance/sessions/active`
-- `POST /api/attendance/mark`
-- `POST /api/attendance/manual`
-- `GET /api/attendance/my`
-- `GET /api/attendance/report`
-- `GET /api/attendance/percentage`
-
-## Production note
-
-For a real college deployment, move SQLite to PostgreSQL/MySQL, store JWT secrets in a secret manager, serve over HTTPS, add refresh-token/session management, audit logging and institution SSO.
+## Production deployment notes
+- Use MongoDB Atlas or a managed MongoDB cluster with authentication, TLS and backups.
+- Serve the frontend/API over HTTPS; browser geolocation requires a secure context in production.
+- Store `JWT_SECRET`, `QR_SECRET` and MongoDB credentials in a secret manager, not source control.
+- Set an exact production `CLIENT_URL` instead of `*`.
+- Consider HttpOnly secure cookies/refresh-token rotation, audit logs, account lockout/MFA and institution SSO for a larger deployment.

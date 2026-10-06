@@ -5,46 +5,40 @@ Browser
   │
   ▼
 React + Vite SPA
-  │ Axios / JWT
+  │ Axios / JWT / Browser Geolocation
   ▼
 Express REST API
-  ├── Authentication / Role middleware
-  ├── Student APIs
-  ├── Faculty APIs
-  ├── Subject APIs
-  └── Attendance + QR APIs
+  ├── Authentication + role middleware
+  ├── Admin / user provisioning
+  ├── Location policy
+  ├── Subject + enrollment APIs
+  └── Attendance + rotating QR APIs
   │
   ▼
-SQLite database
+MongoDB via Mongoose
   ├── users
   ├── subjects
   ├── enrollments
-  ├── attendance_sessions
-  └── attendance
+  ├── attendancesessions
+  ├── attendances
+  └── settings
 ```
 
-## Why this stack?
+## Security boundaries
+Frontend route protection is only a UX control. Every protected API endpoint validates the JWT and role server-side.
 
-- **React** replaces the FSD1 static HTML pages with reusable components, routing and state-driven UI.
-- **Vite** gives fast development and a simple production build.
-- **Node.js + Express** provides the server-side REST API taught in FSD2.
-- **SQLite** is appropriate for a college project because it persists data without requiring a separate database server.
-- **JWT + bcrypt** demonstrates real authentication instead of FSD1's localStorage-only mock login.
-- **QR sessions** are created on the server and expire automatically, preventing a permanent static attendance QR.
+There is no public registration endpoint and no seeded/demo account. The initial admin is created explicitly using the backend CLI bootstrap command.
 
-## Request flow
+## Location verification
+The browser supplies latitude/longitude after requesting permission. The server loads the administrator's configured attendance location and calculates Haversine distance. Attendance is rejected if the distance is greater than the configured radius.
 
-### Student QR attendance
+The submitted coordinates are stored with QR attendance as an audit field (`location.latitude`, `location.longitude`, `location.distanceMeters`). Browser GPS is not a tamper-proof security boundary; production deployments should consider stronger device/identity controls if required.
 
-1. Faculty logs in.
-2. Faculty selects a subject and creates a session.
-3. Express generates a cryptographically random token and stores its expiry.
-4. The server returns a QR data URL.
-5. Student scans the QR.
-6. React sends the token with the student's JWT.
-7. Express verifies the token, session status, expiry and enrollment.
-8. A unique daily attendance record is inserted.
+## Rotating QR
+Each attendance session has a start/end time. The QR payload is derived from:
 
-### Security boundaries
+```text
+HMAC-SHA256(QR_SECRET, sessionId + ":" + floor(currentTime / 20 seconds))
+```
 
-Authentication and role checks are enforced on the backend. Frontend route guards are only for user experience; they are not treated as security controls.
+The payload is not a permanent random token. The frontend refreshes the QR every second so the displayed code changes at each 20-second boundary. The API accepts only the current 20-second slot, plus normal session/enrollment checks.

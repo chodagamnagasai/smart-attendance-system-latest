@@ -1,18 +1,13 @@
-# FSD1 → FSD2 changes
+# FSD2 Changelog
 
-| FSD1 | FSD2 |
-|---|---|
-| Static HTML pages | React single-page application |
-| CSS + one global JS file | Reusable React components + state |
-| localStorage mock login | JWT authentication + bcrypt password hashing |
-| Browser-only role check | Backend role-based authorization |
-| Fake QR generation | Server-created expiring QR sessions |
-| Fake attendance toast | Persistent SQLite attendance records |
-| Placeholder reports | API-backed attendance analytics |
-| Static management pages | Admin CRUD APIs and forms |
-| No backend | Node.js + Express REST API |
-| No database | SQLite with users, subjects, enrollment and attendance tables |
-
-## What remains from FSD1
-
-The original project is preserved under `docs/fsd1-original/` for submission/demo comparison. The React application intentionally retains the original Smart Attendance concept, roles and major screens while replacing the mock behavior with working full-stack functionality.
+## 3.0.0 — MongoDB + secure attendance controls
+- Replaced SQLite/sql.js with MongoDB + Mongoose.
+- Removed seeded/demo users and public registration.
+- Added secure admin bootstrap CLI.
+- Added strong password validation for provisioned accounts.
+- Added administrator-controlled attendance latitude/longitude/radius.
+- Added server-side Haversine location enforcement.
+- Added signed 20-second rotating QR payloads.
+- Added browser geolocation requirement for student QR attendance.
+- Added attendance-location audit data to QR attendance records.
+- Preserved the existing React application structure and visual theme where practical.

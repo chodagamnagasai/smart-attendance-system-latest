@@ -1,155 +1,78 @@
-import initSqlJs from 'sql.js';
-import bcrypt from 'bcryptjs';
-import fs from 'node:fs';
-import path from 'node:path';
-import { createRequire } from 'node:module';
+import mongoose from 'mongoose';
 
-const require = createRequire(import.meta.url);
-const sqlJsDistDir = path.dirname(require.resolve('sql.js'));
-const dbFile = process.env.DB_FILE || './data/attendance.db';
-const absolute = path.resolve(process.cwd(), dbFile);
-fs.mkdirSync(path.dirname(absolute), { recursive: true });
+const userSchema = new mongoose.Schema({
+  userCode: { type: String, required: true, unique: true, trim: true, uppercase: true },
+  name: { type: String, required: true, trim: true },
+  email: { type: String, required: true, unique: true, trim: true, lowercase: true },
+  passwordHash: { type: String, required: true },
+  role: { type: String, enum: ['admin', 'faculty', 'student'], required: true },
+  department: { type: String, default: '', trim: true },
+  semester: { type: Number, default: null }
+}, { timestamps: true });
 
-let sqlite = null;
-export let db = null;
+const subjectSchema = new mongoose.Schema({
+  code: { type: String, required: true, unique: true, trim: true, uppercase: true },
+  name: { type: String, required: true, trim: true },
+  facultyId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  semester: { type: Number, required: true },
+  department: { type: String, default: '', trim: true }
+}, { timestamps: true });
 
-function saveDatabase() {
-  if (!sqlite) return;
-  const data = sqlite.export();
-  fs.writeFileSync(absolute, Buffer.from(data));
-}
+const enrollmentSchema = new mongoose.Schema({
+  studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject', required: true }
+}, { timestamps: true });
+enrollmentSchema.index({ studentId: 1, subjectId: 1 }, { unique: true });
 
-function normalizeParams(params) {
-  if (params.length === 1 && Array.isArray(params[0])) return params[0];
-  return params;
-}
+const sessionSchema = new mongoose.Schema({
+  subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject', required: true },
+  facultyId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  startsAt: { type: Date, required: true },
+  expiresAt: { type: Date, required: true },
+  status: { type: String, enum: ['active', 'closed'], default: 'active' }
+}, { timestamps: true });
+sessionSchema.index({ facultyId: 1, status: 1, expiresAt: 1 });
 
-function createStatement(sql) {
-  return {
-    get(...params) {
-      const statement = sqlite.prepare(sql);
-      try {
-        statement.bind(normalizeParams(params));
-        return statement.step() ? statement.getAsObject() : undefined;
-      } finally {
-        statement.free();
-      }
-    },
-    all(...params) {
-      const statement = sqlite.prepare(sql);
-      const rows = [];
-      try {
-        statement.bind(normalizeParams(params));
-        while (statement.step()) rows.push(statement.getAsObject());
-        return rows;
-      } finally {
-        statement.free();
-      }
-    },
-    run(...params) {
-      const statement = sqlite.prepare(sql);
-      try {
-        statement.bind(normalizeParams(params));
-        while (statement.step()) { /* consume statements that return rows */ }
-      } finally {
-        statement.free();
-      }
-      const lastInsertRowid = sqlite.exec('SELECT last_insert_rowid() AS id')[0]?.values?.[0]?.[0] ?? 0;
-      const changes = sqlite.getRowsModified();
-      saveDatabase();
-      return { lastInsertRowid, changes };
-    }
-  };
-}
+const attendanceSchema = new mongoose.Schema({
+  sessionId: { type: mongoose.Schema.Types.ObjectId, ref: 'AttendanceSession', default: null },
+  studentId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  subjectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Subject', required: true },
+  attendanceDate: { type: String, required: true },
+  markedAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ['present', 'absent', 'late'], default: 'present' },
+  method: { type: String, enum: ['qr', 'manual'], default: 'qr' },
+  location: {
+    latitude: Number,
+    longitude: Number,
+    distanceMeters: Number
+  }
+}, { timestamps: true });
+attendanceSchema.index({ studentId: 1, subjectId: 1, attendanceDate: 1 }, { unique: true });
+
+const settingSchema = new mongoose.Schema({
+  key: { type: String, unique: true, required: true },
+  value: { type: mongoose.Schema.Types.Mixed, required: true },
+  updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null }
+}, { timestamps: true });
+
+export const User = mongoose.models.User || mongoose.model('User', userSchema);
+export const Subject = mongoose.models.Subject || mongoose.model('Subject', subjectSchema);
+export const Enrollment = mongoose.models.Enrollment || mongoose.model('Enrollment', enrollmentSchema);
+export const AttendanceSession = mongoose.models.AttendanceSession || mongoose.model('AttendanceSession', sessionSchema);
+export const Attendance = mongoose.models.Attendance || mongoose.model('Attendance', attendanceSchema);
+export const Setting = mongoose.models.Setting || mongoose.model('Setting', settingSchema);
 
 export async function initDb() {
-  const SQL = await initSqlJs({
-    locateFile: file => path.join(sqlJsDistDir, file)
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI is required. Create backend/.env before starting the API.');
+  await mongoose.connect(uri, {
+    serverSelectionTimeoutMS: 10000,
+    maxPoolSize: Number(process.env.MONGODB_MAX_POOL_SIZE || 10)
   });
-
-  const existing = fs.existsSync(absolute) ? fs.readFileSync(absolute) : undefined;
-  sqlite = existing ? new SQL.Database(existing) : new SQL.Database();
-
-  sqlite.exec('PRAGMA foreign_keys = ON;');
-  db = {
-    prepare: createStatement,
-    exec(sql) {
-      const result = sqlite.exec(sql);
-      saveDatabase();
-      return result;
-    }
-  };
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_code TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('admin','faculty','student')),
-      department TEXT DEFAULT '',
-      semester INTEGER,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS subjects (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      code TEXT UNIQUE NOT NULL,
-      name TEXT NOT NULL,
-      faculty_id INTEGER NOT NULL,
-      semester INTEGER NOT NULL,
-      department TEXT DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(faculty_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-    CREATE TABLE IF NOT EXISTS enrollments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      student_id INTEGER NOT NULL,
-      subject_id INTEGER NOT NULL,
-      UNIQUE(student_id, subject_id),
-      FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY(subject_id) REFERENCES subjects(id) ON DELETE CASCADE
-    );
-    CREATE TABLE IF NOT EXISTS attendance_sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      subject_id INTEGER NOT NULL,
-      faculty_id INTEGER NOT NULL,
-      token TEXT UNIQUE NOT NULL,
-      starts_at TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','closed')),
-      FOREIGN KEY(subject_id) REFERENCES subjects(id) ON DELETE CASCADE,
-      FOREIGN KEY(faculty_id) REFERENCES users(id) ON DELETE CASCADE
-    );
-    CREATE TABLE IF NOT EXISTS attendance (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id INTEGER,
-      student_id INTEGER NOT NULL,
-      subject_id INTEGER NOT NULL,
-      attendance_date TEXT NOT NULL,
-      marked_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      status TEXT NOT NULL DEFAULT 'present' CHECK(status IN ('present','absent','late')),
-      method TEXT NOT NULL DEFAULT 'qr' CHECK(method IN ('qr','manual')),
-      UNIQUE(student_id, subject_id, attendance_date),
-      FOREIGN KEY(session_id) REFERENCES attendance_sessions(id) ON DELETE SET NULL,
-      FOREIGN KEY(student_id) REFERENCES users(id) ON DELETE CASCADE,
-      FOREIGN KEY(subject_id) REFERENCES subjects(id) ON DELETE CASCADE
-    );
-  `);
-
-  const count = db.prepare('SELECT COUNT(*) c FROM users').get().c;
-  if (Number(count) === 0) seed();
-  else saveDatabase();
+  await Promise.all([User.init(), Subject.init(), Enrollment.init(), Attendance.init(), AttendanceSession.init(), Setting.init()]);
+  console.log(`MongoDB connected: ${mongoose.connection.name}`);
 }
 
-function seed() {
-  const password = bcrypt.hashSync('Password@123', 10);
-  const insertUser = db.prepare(`INSERT INTO users (user_code,name,email,password_hash,role,department,semester) VALUES (?,?,?,?,?,?,?)`);
-  const admin = insertUser.run('admin001','System Administrator','admin@smartattendance.local',password,'admin','Administration',null).lastInsertRowid;
-  const faculty = insertUser.run('faculty001','Dr. Priya Sharma','faculty@smartattendance.local',password,'faculty','Computer Science',6).lastInsertRowid;
-  const student = insertUser.run('student001','Rahul Kumar','student@smartattendance.local',password,'student','Computer Science',6).lastInsertRowid;
-  const subject = db.prepare(`INSERT INTO subjects (code,name,faculty_id,semester,department) VALUES (?,?,?,?,?)`).run('FSD2','Full Stack Development 2',faculty,6,'Computer Science').lastInsertRowid;
-  db.prepare('INSERT INTO enrollments (student_id,subject_id) VALUES (?,?)').run(student, subject);
-  void admin;
-  console.log('Seeded demo data. Password for all demo users: Password@123');
+export async function closeDb() {
+  await mongoose.disconnect();
 }
