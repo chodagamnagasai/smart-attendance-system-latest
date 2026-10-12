@@ -14,18 +14,48 @@ const app = express();
 const PORT = Number(process.env.PORT || 5000);
 const JWT_SECRET = process.env.JWT_SECRET;
 const QR_SECRET = process.env.QR_SECRET;
-const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173';
+// CLIENT_URL supports a comma-separated allow-list, which is useful for local
+// development and a separately hosted Vercel frontend.
+const configuredOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
+  .split(',')
+  .map(origin => origin.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+const allowedOrigins = new Set([
+  ...configuredOrigins,
+  ...(process.env.NODE_ENV !== 'production'
+    ? ['http://localhost:5173', 'http://127.0.0.1:5173']
+    : [])
+]);
 const QR_INTERVAL_MS = 20_000;
 const PASSWORD_MIN = 8;
 if (!JWT_SECRET || JWT_SECRET.length < 32) throw new Error('JWT_SECRET must be set and at least 32 characters long.');
 if (!QR_SECRET || QR_SECRET.length < 32) throw new Error('QR_SECRET must be set and at least 32 characters long.');
 await initDb();
-app.disable('x-powered-by'); app.set('trust proxy', 1);
-app.use(helmet()); app.use(cors({ origin: CLIENT_URL, credentials: true })); app.use(express.json({ limit: '1mb' }));
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+app.use(helmet());
+app.use(cors({
+  origin(origin, callback) {
+    // Allow command-line clients and same-origin requests with no Origin header.
+    if (!origin) return callback(null, true);
+    const normalizedOrigin = origin.trim().replace(/\/+$/, '');
+    if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
+    return callback(new Error(`CORS_ORIGIN_DENIED:${origin}`));
+  },
+  credentials: true,
+  optionsSuccessStatus: 204,
+  maxAge: 600
+}));
+app.use(express.json({ limit: '1mb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }));
 
 const oid = id => mongoose.isValidObjectId(id) ? new mongoose.Types.ObjectId(id) : null;
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => new Intl.DateTimeFormat('en-CA', {
+  timeZone: process.env.APP_TIME_ZONE || 'Asia/Kolkata',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit'
+}).format(new Date());
 const validCredentials = (userCode, password) => typeof userCode === 'string' && /^[A-Za-z0-9._-]{3,50}$/.test(userCode) && typeof password === 'string';
 const validPassword = password => typeof password === 'string' && password.length >= PASSWORD_MIN;
 const validDepartment = value => DEPARTMENTS.includes(value);
@@ -37,7 +67,12 @@ function auth(req, res, next) { const h = req.headers.authorization || ''; const
 const roles = (...allowed) => (req, res, next) => allowed.includes(req.user.role) ? next() : res.status(403).json({ message: 'You do not have permission for this action' });
 
 function distanceMeters(lat1, lon1, lat2, lon2) { const r = 6371000, rad = d => d * Math.PI / 180, dLat = rad(lat2-lat1), dLon = rad(lon2-lon1); const a = Math.sin(dLat/2)**2 + Math.cos(rad(lat1))*Math.cos(rad(lat2))*Math.sin(dLon/2)**2; return 2*r*Math.asin(Math.sqrt(a)); }
-function validateCoordinates(lat, lon) { return Number.isFinite(Number(lat)) && Number(lat) >= -90 && Number(lat) <= 90 && Number.isFinite(Number(lon)) && Number(lon) >= -180 && Number(lon) <= 180; }
+function validateCoordinates(lat, lon) {
+  if (lat === undefined || lat === null || String(lat).trim() === '' ||
+      lon === undefined || lon === null || String(lon).trim() === '') return false;
+  return Number.isFinite(Number(lat)) && Number(lat) >= -90 && Number(lat) <= 90 &&
+    Number.isFinite(Number(lon)) && Number(lon) >= -180 && Number(lon) <= 180;
+}
 async function getLocationConfig() { return (await Setting.findOne({ key: 'attendanceLocation' }).lean())?.value || null; }
 function qrSlot(now=Date.now()) { return Math.floor(now / QR_INTERVAL_MS); }
 function qrSignature(sessionId, slot) { return crypto.createHmac('sha256', QR_SECRET).update(`${sessionId}:${slot}`).digest('base64url'); }
@@ -47,7 +82,22 @@ async function buildQr(session) { const now=Date.now(), slot=qrSlot(now), payloa
 app.get('/api/health',(_,res)=>res.json({status:'ok',database:mongoose.connection.readyState===1?'mongodb':'disconnected'}));
 app.get('/api/meta/departments',auth,(_,res)=>res.json({departments:DEPARTMENTS,classes:CLASS_SECTIONS}));
 
-app.post('/api/auth/login',async(req,res)=>{const {userCode,password,role}=req.body||{}; if(!validCredentials(userCode,password)||!['admin','faculty','student'].includes(role))return res.status(401).json({message:'Invalid credentials'}); const user=await User.findOne({userCode:String(userCode).toUpperCase(),role}); if(!user||!(await bcrypt.compare(password,user.passwordHash)))return res.status(401).json({message:'Invalid credentials'}); res.json({token:sign(user),user:safeUser(user)});});
+app.post('/api/auth/login', async (req, res) => {
+  const { userCode, password, role } = req.body || {};
+  if (!validCredentials(userCode, password) || !['admin', 'faculty', 'student'].includes(role)) {
+    return res.status(401).json({ message: 'Enter a valid user ID, password and account role.' });
+  }
+  try {
+    const user = await User.findOne({ userCode: String(userCode).trim().toUpperCase(), role });
+    if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      return res.status(401).json({ message: 'Invalid user ID, password, or selected role.' });
+    }
+    return res.json({ token: sign(user), user: safeUser(user) });
+  } catch (error) {
+    console.error('Login failed because of a backend/database error:', error?.message || error);
+    return res.status(503).json({ message: 'Login service is temporarily unavailable. Check the backend database connection and try again.' });
+  }
+});
 app.get('/api/auth/me',auth,async(req,res)=>{const u=await User.findById(req.user.id); if(!u)return res.status(401).json({message:'Account no longer exists'}); res.json({user:safeUser(u)});});
 
 app.get('/api/dashboard/summary',auth,async(req,res)=>{
@@ -118,5 +168,16 @@ app.get('/api/attendance/report', auth, roles('faculty','admin'), async (req, re
   res.json(rows.sort((a,b) => a.subjectCode.localeCompare(b.subjectCode) || a.studentName.localeCompare(b.studentName)));
 });
 
-app.use((err,req,res,next)=>{console.error(err);res.status(500).json({message:'Internal server error'});});
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (typeof err?.message === 'string' && err.message.startsWith('CORS_ORIGIN_DENIED:')) {
+    const origin = err.message.slice('CORS_ORIGIN_DENIED:'.length);
+    console.warn(`Blocked CORS origin: ${origin}`);
+    return res.status(403).json({
+      message: `This frontend origin is not allowed. Add ${origin} to CLIENT_URL in the backend environment, separated by commas.`
+    });
+  }
+  console.error('Unhandled API error:', err?.stack || err);
+  return res.status(500).json({ message: 'Internal server error. Check the backend logs for details.' });
+});
 app.listen(PORT,()=>console.log(`Smart Attendance API running at http://localhost:${PORT}`));

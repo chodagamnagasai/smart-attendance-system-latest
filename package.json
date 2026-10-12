@@ -7,7 +7,9 @@
     "dev": "concurrently \"npm --prefix backend run dev\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix frontend run build",
     "start": "npm --prefix backend start",
-    "create-admin": "npm --prefix backend run create-admin"
+    "create-admin": "npm --prefix backend run create-admin --"
   },
-  "devDependencies": { "concurrently": "^9.1.2" }
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
 }
