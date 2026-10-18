@@ -168,7 +168,412 @@ function QRGenerator(){
 function ManualAttendance({admin=false}){const[students,setStudents]=useState([]),[subjects,setSubjects]=useState([]),[form,setForm]=useState({date:localDateInput(),status:'present'}),[msg,setMsg]=useState(''),[error,setError]=useState('');useEffect(()=>{Promise.all([api.get('/students'),api.get('/subjects')]).then(([a,b])=>{setStudents(a.data);setSubjects(b.data);setForm(f=>({...f,studentId:a.data[0]?.id,subjectId:b.data[0]?.id}))})},[]);async function save(){try{const r=await api.post('/attendance/manual',form);setMsg(r.data.message);setError('')}catch(e){setError(errorOf(e))}}return <><PageTitle title={admin?'Admin Attendance':'Manual Attendance'} desc={admin?'Admins can explicitly add or correct attendance for enrolled students.':'Faculty can correct attendance records for their subjects.'}/><div className="panel form-panel"><div className="grid two"><label>Student<select value={form.studentId||''} onChange={e=>setForm({...form,studentId:e.target.value})}>{students.map(s=><option key={s.id} value={s.id}>{s.userCode} — {s.name} ({s.classSection||'-'})</option>)}</select></label><label>Subject<select value={form.subjectId||''} onChange={e=>setForm({...form,subjectId:e.target.value})}>{subjects.map(s=><option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}</select></label><label>Date<input type="date" value={form.date} onChange={e=>setForm({...form,date:e.target.value})}/></label><label>Status<select value={form.status} onChange={e=>setForm({...form,status:e.target.value})}><option value="present">Present</option><option value="absent">Absent</option><option value="late">Late</option></select></label></div><button className="btn" onClick={save}>Save Attendance</button>{msg&&<div className="success-box">{msg}</div>}{error&&<div className="error-box">{error}</div>}</div></>}
 function Reports(){const[rows,setRows]=useState([]),[subjects,setSubjects]=useState([]),[subjectId,setSubjectId]=useState('');useEffect(()=>{api.get('/subjects').then(r=>setSubjects(r.data));load()},[]);async function load(id=''){const r=await api.get('/attendance/report',{params:id?{subjectId:id}:{}});setRows(r.data)}return <><PageTitle title="Attendance Reports" desc="View subject-wise student attendance analytics."><select className="title-select" value={subjectId} onChange={e=>{setSubjectId(e.target.value);load(e.target.value)}}><option value="">All subjects</option>{subjects.map(s=><option key={s.id} value={s.id}>{s.code}</option>)}</select></PageTitle><div className="panel table-wrap"><table><thead><tr><th>Student</th><th>Subject</th><th>Present</th><th>Absent</th><th>Late</th><th>Percentage</th></tr></thead><tbody>{rows.map((r,i)=><tr key={i}><td><b>{r.userCode}</b> {r.studentName}</td><td>{r.subjectCode}</td><td>{r.present}</td><td>{r.absent}</td><td>{r.late}</td><td><strong className={r.percentage<75?'warn-text':''}>{r.percentage}%</strong></td></tr>)}</tbody></table></div></>}
 function Crud({type}){const isStudent=type==='students',[departments,setDepartments]=useState([]),[classes,setClasses]=useState([]),[rows,setRows]=useState([]),[form,setForm]=useState({}),[editing,setEditing]=useState(null),[msg,setMsg]=useState(''),[error,setError]=useState('');async function load(){const r=await api.get(`/${type}`);setRows(r.data)}useEffect(()=>{load();api.get('/meta/departments').then(r=>{setDepartments(r.data.departments);setClasses(r.data.classes)})},[type]);function reset(){setForm({});setEditing(null);setMsg('');setError('')}async function save(e){e.preventDefault();try{if(editing)await api.put(`/${type}/${editing}`,form);else await api.post(`/${type}`,form);setMsg(editing?'Details updated successfully':`${isStudent?'Student':'Faculty'} created successfully`);reset();load()}catch(e){setError(errorOf(e))}}async function del(id){if(!confirm('Delete this account?'))return;await api.delete(`/${type}/${id}`);load()}function edit(r){setEditing(r.id);setForm({userCode:r.userCode,name:r.name,email:r.email,department:r.department,batch:r.batch,classSection:r.classSection,password:''});setMsg('');setError('')}return <><PageTitle title={`Manage ${isStudent?'Students':'Faculty'}`} desc="Administrators can provision and edit accounts."/><div className="panel form-panel"><div className="panel-head"><h3>{editing?'Edit':'Add'} {isStudent?'Student':'Faculty'}</h3>{editing&&<button className="btn secondary small" onClick={reset}>Cancel</button>}</div><form className="grid two" onSubmit={save}><label>User ID<input disabled={!!editing} value={form.userCode||''} onChange={e=>setForm({...form,userCode:e.target.value})} required/></label><label>Full name<input value={form.name||''} onChange={e=>setForm({...form,name:e.target.value})} required/></label><label>Email<input type="email" value={form.email||''} onChange={e=>setForm({...form,email:e.target.value})} required/></label><label>Department<select value={form.department||''} onChange={e=>setForm({...form,department:e.target.value})} required><option value="">Select department</option>{departments.map(d=><option key={d}>{d}</option>)}</select></label>{isStudent&&<><label>Batch<input placeholder="e.g. 2026-2030" value={form.batch||''} onChange={e=>setForm({...form,batch:e.target.value})} required/></label><label>Class<select value={form.classSection||''} onChange={e=>setForm({...form,classSection:e.target.value})} required><option value="">Select class</option>{classes.map(c=><option key={c}>{c}</option>)}</select></label></>}<label>Password {editing&&<small>(leave blank to keep current)</small>}<input type="password" minLength="8" placeholder="Minimum 8 characters" value={form.password||''} onChange={e=>setForm({...form,password:e.target.value})} required={!editing}/></label><button className="btn">{editing?'Update':'Create account'}</button></form>{msg&&<div className="success-box">{msg}</div>}{error&&<div className="error-box">{error}</div>}</div><div className="panel table-wrap"><table><thead><tr><th>ID</th><th>Name</th><th>Email</th><th>Department</th>{isStudent&&<><th>Batch</th><th>Class</th></>}<th>Action</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{r.userCode}</td><td>{r.name}</td><td>{r.email}</td><td>{r.department}</td>{isStudent&&<><td>{r.batch||'—'}</td><td>{r.classSection||'—'}</td></>}<td><button className="text-btn" onClick={()=>edit(r)}><Edit3 size={15}/> Edit</button> <button className="danger-link" onClick={()=>del(r.id)}>Delete</button></td></tr>)}</tbody></table></div></>}
-function Subjects(){const[rows,setRows]=useState([]),[faculty,setFaculty]=useState([]),[students,setStudents]=useState([]),[departments,setDepartments]=useState([]),[classes,setClasses]=useState([]),[form,setForm]=useState({}),[enroll,setEnroll]=useState({mode:'individual'}),[msg,setMsg]=useState(''),[error,setError]=useState('');async function load(){const [s,f,st,m]=await Promise.all([api.get('/subjects'),api.get('/faculty'),api.get('/students'),api.get('/meta/departments')]);setRows(s.data);setFaculty(f.data);setStudents(st.data);setDepartments(m.data.departments);setClasses(m.data.classes)}useEffect(()=>{load()},[]);const filteredFaculty=faculty.filter(f=>f.department===form.department);async function add(e){e.preventDefault();try{await api.post('/subjects',form);setForm({});setMsg('Subject created');setError('');load()}catch(e){setError(errorOf(e))}}async function enrollSubject(id){try{const payload=enroll.mode==='individual'?{mode:'individual',studentId:enroll.studentId}:{mode:'class',batch:enroll.batch,classSection:enroll.classSection};const r=await api.post(`/subjects/${id}/enroll`,payload);setMsg(r.data.message);setError('')}catch(e){setError(errorOf(e))}}return <><PageTitle title="Manage Subjects" desc="Select subject department first, then only faculty from that department."/><div className="panel form-panel"><form className="grid two" onSubmit={add}><label>Subject code<input value={form.code||''} onChange={e=>setForm({...form,code:e.target.value})} required/></label><label>Subject name<input value={form.name||''} onChange={e=>setForm({...form,name:e.target.value})} required/></label><label>Department<select value={form.department||''} onChange={e=>setForm({...form,department:e.target.value,facultyId:''})} required><option value="">Select department first</option>{departments.map(d=><option key={d}>{d}</option>)}</select></label><label>Faculty (select one or more)<select multiple value={form.facultyIds||[]} onChange={e=>setForm({...form,facultyIds:Array.from(e.target.selectedOptions,o=>o.value),facultyId:Array.from(e.target.selectedOptions,o=>o.value)[0]||''})} disabled={!form.department} required>{filteredFaculty.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}</select><small>Hold Ctrl (Windows) or Command (Mac) to select multiple faculty.</small></label><label>Semester<input type="number" min="1" max="12" value={form.semester||''} onChange={e=>setForm({...form,semester:Number(e.target.value)})} required/></label><button className="btn">Create Subject</button></form></div><div className="panel form-panel"><h3>Enroll Students</h3><div className="tabs"><button className={enroll.mode==='individual'?'selected':''} onClick={()=>setEnroll({mode:'individual'})}>Individual student</button><button className={enroll.mode==='class'?'selected':''} onClick={()=>setEnroll({mode:'class'})}>Entire class</button></div><div className="grid two"><label>Subject<select value={enroll.subjectId||''} onChange={e=>setEnroll({...enroll,subjectId:e.target.value})}><option value="">Select subject</option>{rows.map(s=><option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}</select></label>{enroll.mode==='individual'?<label>Student<select value={enroll.studentId||''} onChange={e=>setEnroll({...enroll,studentId:e.target.value})}><option value="">Select student</option>{students.map(s=><option key={s.id} value={s.id}>{s.userCode} — {s.name} · {s.department} · {s.batch}/{s.classSection}</option>)}</select></label>:<><label>Batch<input placeholder="e.g. 2026-2030" value={enroll.batch||''} onChange={e=>setEnroll({...enroll,batch:e.target.value})}/></label><label>Class<select value={enroll.classSection||''} onChange={e=>setEnroll({...enroll,classSection:e.target.value})}><option value="">Select class</option>{classes.map(c=><option key={c}>{c}</option>)}</select></label></>}</div><button className="btn" disabled={!enroll.subjectId||(enroll.mode==='individual'?!enroll.studentId:!enroll.batch||!enroll.classSection)} onClick={()=>enrollSubject(enroll.subjectId)}>Enroll {enroll.mode==='class'?'class':'student'}</button>{msg&&<div className="success-box">{msg}</div>}{error&&<div className="error-box">{error}</div>}</div><div className="panel table-wrap"><table><thead><tr><th>Code</th><th>Subject</th><th>Department</th><th>Faculty</th><th>Semester</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{r.code}</td><td>{r.name}</td><td>{r.department}</td><td>{r.facultyName}</td><td>{r.semester}</td></tr>)}</tbody></table></div></>}
+
+function Subjects() {
+  const [rows, setRows] = useState([]);
+  const [faculty, setFaculty] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [classes, setClasses] = useState([]);
+  const [form, setForm] = useState({});
+  const [editing, setEditing] = useState(null);
+  const [enroll, setEnroll] = useState({ mode: 'individual' });
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  async function load() {
+    const [s, f, st, m] = await Promise.all([
+      api.get('/subjects'),
+      api.get('/faculty'),
+      api.get('/students'),
+      api.get('/meta/departments')
+    ]);
+
+    setRows(s.data);
+    setFaculty(f.data);
+    setStudents(st.data);
+    setDepartments(m.data.departments);
+    setClasses(m.data.classes);
+  }
+
+  useEffect(() => {
+    load().catch(e => setError(errorOf(e)));
+  }, []);
+
+  const filteredFaculty = faculty.filter(
+    f => f.department === form.department
+  );
+
+  function resetForm() {
+    setForm({});
+    setEditing(null);
+    setMsg('');
+    setError('');
+  }
+
+  function editSubject(subject) {
+    setEditing(subject.id);
+    setForm({
+      code: subject.code,
+      name: subject.name,
+      department: subject.department,
+      facultyId: subject.facultyId,
+      semester: subject.semester
+    });
+    setMsg('');
+    setError('');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  async function saveSubject(e) {
+    e.preventDefault();
+    setMsg('');
+    setError('');
+
+    try {
+      if (editing) {
+        await api.put(`/subjects/${editing}`, form);
+        setMsg('Subject updated successfully.');
+      } else {
+        await api.post('/subjects', form);
+        setMsg('Subject created successfully.');
+      }
+
+      setForm({});
+      setEditing(null);
+      await load();
+    } catch (e) {
+      setError(errorOf(e));
+    }
+  }
+
+  async function deleteSubject(subject) {
+    const confirmed = window.confirm(
+      `Delete subject "${subject.code} - ${subject.name}"? ` +
+      'Its enrollments, attendance records and attendance sessions ' +
+      'will also be deleted. This action cannot be undone.'
+    );
+
+    if (!confirmed) return;
+
+    setMsg('');
+    setError('');
+
+    try {
+      await api.delete(`/subjects/${subject.id}`);
+
+      if (editing === subject.id) {
+        setForm({});
+        setEditing(null);
+      }
+
+      setMsg(`Subject "${subject.code}" deleted successfully.`);
+      await load();
+    } catch (e) {
+      setError(errorOf(e));
+    }
+  }
+
+  async function enrollSubject(id) {
+    setMsg('');
+    setError('');
+
+    try {
+      const payload =
+        enroll.mode === 'individual'
+          ? {
+              mode: 'individual',
+              studentId: enroll.studentId
+            }
+          : {
+              mode: 'class',
+              batch: enroll.batch,
+              classSection: enroll.classSection
+            };
+
+      const r = await api.post(
+        `/subjects/${id}/enroll`,
+        payload
+      );
+
+      setMsg(r.data.message);
+    } catch (e) {
+      setError(errorOf(e));
+    }
+  }
+
+  return (
+    <>
+      <PageTitle
+        title="Manage Subjects"
+        desc="Create, edit and delete subjects. Select a department first to filter faculty."
+      />
+
+      <div className="panel form-panel">
+        <div className="panel-head">
+          <h3>{editing ? 'Edit Subject' : 'Create Subject'}</h3>
+
+          {editing && (
+            <button
+              type="button"
+              className="btn secondary small"
+              onClick={resetForm}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+
+        <form className="grid two" onSubmit={saveSubject}>
+          <label>
+            Subject code
+            <input
+              value={form.code || ''}
+              onChange={e =>
+                setForm({ ...form, code: e.target.value })
+              }
+              required
+            />
+          </label>
+
+          <label>
+            Subject name
+            <input
+              value={form.name || ''}
+              onChange={e =>
+                setForm({ ...form, name: e.target.value })
+              }
+              required
+            />
+          </label>
+
+          <label>
+            Department
+            <select
+              value={form.department || ''}
+              onChange={e =>
+                setForm({
+                  ...form,
+                  department: e.target.value,
+                  facultyId: ''
+                })
+              }
+              required
+            >
+              <option value="">Select department</option>
+              {departments.map(d => (
+                <option key={d} value={d}>{d}</option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Faculty
+            <select
+              value={form.facultyId || ''}
+              onChange={e =>
+                setForm({ ...form, facultyId: e.target.value })
+              }
+              disabled={!form.department}
+              required
+            >
+              <option value="">Select faculty</option>
+              {filteredFaculty.map(f => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            Semester
+            <input
+              type="number"
+              min="1"
+              max="12"
+              value={form.semester ?? ''}
+              onChange={e =>
+                setForm({
+                  ...form,
+                  semester: e.target.value === ''
+                    ? ''
+                    : Number(e.target.value)
+                })
+              }
+              required
+            />
+          </label>
+
+          <button className="btn" type="submit">
+            {editing ? 'Save Changes' : 'Create Subject'}
+          </button>
+        </form>
+
+        {msg && <div className="success-box">{msg}</div>}
+        {error && <div className="error-box">{error}</div>}
+      </div>
+
+      <div className="panel form-panel">
+        <h3>Enroll Students</h3>
+
+        <div className="tabs">
+          <button
+            type="button"
+            className={enroll.mode === 'individual' ? 'selected' : ''}
+            onClick={() => setEnroll({ mode: 'individual' })}
+          >
+            Individual student
+          </button>
+
+          <button
+            type="button"
+            className={enroll.mode === 'class' ? 'selected' : ''}
+            onClick={() => setEnroll({ mode: 'class' })}
+          >
+            Entire class
+          </button>
+        </div>
+
+        <div className="grid two">
+          <label>
+            Subject
+            <select
+              value={enroll.subjectId || ''}
+              onChange={e =>
+                setEnroll({ ...enroll, subjectId: e.target.value })
+              }
+            >
+              <option value="">Select subject</option>
+              {rows.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.code} — {s.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {enroll.mode === 'individual' ? (
+            <label>
+              Student
+              <select
+                value={enroll.studentId || ''}
+                onChange={e =>
+                  setEnroll({ ...enroll, studentId: e.target.value })
+                }
+              >
+                <option value="">Select student</option>
+                {students.map(s => (
+                  <option key={s.id} value={s.id}>
+                    {s.userCode} — {s.name} · {s.department} ·
+                    {' '}{s.batch}/{s.classSection}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <>
+              <label>
+                Batch
+                <input
+                  placeholder="e.g. 2026-2030"
+                  value={enroll.batch || ''}
+                  onChange={e =>
+                    setEnroll({ ...enroll, batch: e.target.value })
+                  }
+                />
+              </label>
+
+              <label>
+                Class
+                <select
+                  value={enroll.classSection || ''}
+                  onChange={e =>
+                    setEnroll({
+                      ...enroll,
+                      classSection: e.target.value
+                    })
+                  }
+                >
+                  <option value="">Select class</option>
+                  {classes.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </label>
+            </>
+          )}
+        </div>
+
+        <button
+          type="button"
+          className="btn"
+          disabled={
+            !enroll.subjectId ||
+            (enroll.mode === 'individual'
+              ? !enroll.studentId
+              : !enroll.batch || !enroll.classSection)
+          }
+          onClick={() => enrollSubject(enroll.subjectId)}
+        >
+          Enroll {enroll.mode === 'class' ? 'class' : 'student'}
+        </button>
+      </div>
+
+      <div className="panel table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Subject</th>
+              <th>Department</th>
+              <th>Faculty</th>
+              <th>Semester</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {rows.map(r => (
+              <tr key={r.id}>
+                <td>{r.code}</td>
+                <td>{r.name}</td>
+                <td>{r.department}</td>
+                <td>{r.facultyName}</td>
+                <td>{r.semester}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="text-btn"
+                    onClick={() => editSubject(r)}
+                  >
+                    <Edit3 size={15} /> Edit
+                  </button>
+
+                  {' '}
+
+                  <button
+                    type="button"
+                    className="danger-link"
+                    onClick={() => deleteSubject(r)}
+                  >
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan="6">No subjects found.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
 function ClassManagement(){
  const [classes,setClasses]=useState([]),[subjects,setSubjects]=useState([]),[faculty,setFaculty]=useState([]),[students,setStudents]=useState([]),[meta,setMeta]=useState({departments:[],classes:[]}),[message,setMessage]=useState(''),[error,setError]=useState('');
  const [classForm,setClassForm]=useState({name:'',department:'',batch:'',section:'',semester:1,studentIds:[]});
