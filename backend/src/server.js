@@ -14,18 +14,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 5000);
 const JWT_SECRET = process.env.JWT_SECRET;
 const QR_SECRET = process.env.QR_SECRET;
-// CLIENT_URL supports a comma-separated allow-list, which is useful for local
-// development and a separately hosted Vercel frontend.
-const configuredOrigins = (process.env.CLIENT_URL || 'http://localhost:5173')
-  .split(',')
-  .map(origin => origin.trim().replace(/\/+$/, ''))
-  .filter(Boolean);
-const allowedOrigins = new Set([
-  ...configuredOrigins,
-  ...(process.env.NODE_ENV !== 'production'
-    ? ['http://localhost:5173', 'http://127.0.0.1:5173']
-    : [])
-]);
+
 const QR_INTERVAL_MS = 20_000;
 const PASSWORD_MIN = 8;
 if (!JWT_SECRET || JWT_SECRET.length < 32) throw new Error('JWT_SECRET must be set and at least 32 characters long.');
@@ -35,12 +24,12 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
-  origin(origin, callback) {
-    // Allow command-line clients and same-origin requests with no Origin header.
-    if (!origin) return callback(null, true);
-    const normalizedOrigin = origin.trim().replace(/\/+$/, '');
-    if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
-    return callback(new Error(`CORS_ORIGIN_DENIED:${origin}`));
+   origin(origin, callback) {
+     // Allow command-line clients and same-origin requests with no Origin header.
+     if (!origin) return callback(null, true);
+     const normalizedOrigin = origin.trim().replace(/\/+$/, '');
+     if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
+     return callback(new Error(`CORS_
   },
   credentials: true,
   optionsSuccessStatus: 204,
