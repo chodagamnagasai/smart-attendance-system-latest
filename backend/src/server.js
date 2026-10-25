@@ -24,16 +24,9 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(helmet());
 app.use(cors({
-   origin(origin, callback) {
-     // Allow command-line clients and same-origin requests with no Origin header.
-     if (!origin) return callback(null, true);
-     const normalizedOrigin = origin.trim().replace(/\/+$/, '');
-     if (allowedOrigins.has(normalizedOrigin)) return callback(null, true);
-     return callback(new Error(`CORS_
-  },
+  origin: true,
   credentials: true,
-  optionsSuccessStatus: 204,
-  maxAge: 600
+  optionsSuccessStatus: 204
 }));
 app.use(express.json({ limit: '1mb' }));
 app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }));
@@ -159,13 +152,6 @@ app.get('/api/attendance/report', auth, roles('faculty','admin'), async (req, re
 
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
-  if (typeof err?.message === 'string' && err.message.startsWith('CORS_ORIGIN_DENIED:')) {
-    const origin = err.message.slice('CORS_ORIGIN_DENIED:'.length);
-    console.warn(`Blocked CORS origin: ${origin}`);
-    return res.status(403).json({
-      message: `This frontend origin is not allowed. Add ${origin} to CLIENT_URL in the backend environment, separated by commas.`
-    });
-  }
   console.error('Unhandled API error:', err?.stack || err);
   return res.status(500).json({ message: 'Internal server error. Check the backend logs for details.' });
 });
