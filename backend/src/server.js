@@ -10,6 +10,8 @@ import QRCode from 'qrcode';
 import mongoose from 'mongoose';
 import { initDb, User, Subject, Enrollment, AttendanceSession, Attendance, Setting, AcademicClass, TeachingAssignment, DEPARTMENTS, CLASS_SECTIONS } from './db.js';
 
+const cors = require('cors');
+app.use(cors({ origin: '*' }));
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 const JWT_SECRET = process.env.JWT_SECRET;
