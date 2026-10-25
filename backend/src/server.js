@@ -10,8 +10,6 @@ import QRCode from 'qrcode';
 import mongoose from 'mongoose';
 import { initDb, User, Subject, Enrollment, AttendanceSession, Attendance, Setting, AcademicClass, TeachingAssignment, DEPARTMENTS, CLASS_SECTIONS } from './db.js';
 
-const cors = require('cors');
-app.use(cors({ origin: '*' }));
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -182,4 +180,4 @@ app.use((err, req, res, next) => {
   console.error('Unhandled API error:', err?.stack || err);
   return res.status(500).json({ message: 'Internal server error. Check the backend logs for details.' });
 });
-app.listen(PORT,()=>console.log(`Smart Attendance API running at http://localhost:${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Smart Attendance API running on port ${PORT}`));
